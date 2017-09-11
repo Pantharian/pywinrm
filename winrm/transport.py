@@ -196,6 +196,6 @@ class Transport(object):
             if b'http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive' in message and b'Code="2150858793"' in response_text:
                 raise WinRMOperationTimeoutError()
 
-            error_message = 'Bad HTTP response returned from server. Code {0}'.format(ex.response.status_code)
+            error_message = 'Bad HTTP response returned from server - GRRR - Code {0} - {1}'.format(ex.response.status_code, response_text)
 
             raise WinRMTransportError('http', error_message)
