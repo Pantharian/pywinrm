@@ -1,9 +1,12 @@
 from __future__ import unicode_literals
 from contextlib import contextmanager
+import errono
 import re
 import sys
 import os
+import time
 import weakref
+import distutils
 
 is_py2 = sys.version[0] == '2'
 
@@ -19,7 +22,6 @@ else:
 import requests
 import requests.auth
 import warnings
-from distutils.util import strtobool
 from requests.hooks import default_hooks
 from requests.adapters import HTTPAdapter
 
@@ -34,13 +36,6 @@ HAVE_NTLM = False
 try:
     from requests_ntlm import HttpNtlmAuth
     HAVE_NTLM = True
-except ImportError as ie:
-    pass
-
-HAVE_CREDSSP = False
-try:
-    from requests_credssp import HttpCredSSPAuth
-    HAVE_CREDSSP = True
 except ImportError as ie:
     pass
 
@@ -80,7 +75,7 @@ class Transport(object):
         if isinstance(kerberos_delegation, bool):
             self.kerberos_delegation = kerberos_delegation
         else:
-            self.kerberos_delegation = bool(strtobool(str(kerberos_delegation)))
+            self.kerberos_delegation = bool(distutils.util.strtobool(str(kerberos_delegation)))
 
         self.auth_method = auth_method
         self.default_headers = {
@@ -90,21 +85,13 @@ class Transport(object):
 
         # try to suppress user-unfriendly warnings from requests' vendored urllib3
         try:
-            from requests.packages.urllib3.exceptions import InsecurePlatformWarning
+            from requests.packages.urllib3.exceptions import InsecurePlatformWarning, SNIMissingWarning, InsecureRequestWarning
             warnings.simplefilter('ignore', category=InsecurePlatformWarning)
-        except: pass # oh well, we tried...
-
-        try:
-            from requests.packages.urllib3.exceptions import SNIMissingWarning
             warnings.simplefilter('ignore', category=SNIMissingWarning)
-        except: pass # oh well, we tried...
-
-        # if we're explicitly ignoring validation, try to suppress InsecureRequestWarning, since the user opted-in
-        if self.server_cert_validation == 'ignore':
-            try:
-                from requests.packages.urllib3.exceptions import InsecureRequestWarning
+            # if we're explicitly ignoring validation, try to suppress InsecureRequestWarning, since the user opted-in
+            if self.server_cert_validation == 'ignore':
                 warnings.simplefilter('ignore', category=InsecureRequestWarning)
-            except: pass # oh well, we tried...
+        except: pass # oh well, we tried...
 
         # validate credential requirements for various auth types
         if self.auth_method != 'kerberos':
@@ -120,7 +107,7 @@ class Transport(object):
             else:
                 if not self.username:
                     raise InvalidCredentialsError("auth method %s requires a username" % self.auth_method)
-                if self.password is None:
+                if not self.password:
                     raise InvalidCredentialsError("auth method %s requires a password" % self.auth_method)
 
         self.session = None
@@ -162,10 +149,6 @@ class Transport(object):
         # TODO: ssl is not exactly right here- should really be client_cert
         elif self.auth_method in ['basic','plaintext']:
             session.auth = requests.auth.HTTPBasicAuth(username=self.username, password=self.password)
-        elif self.auth_method == 'credssp':
-            if not HAVE_CREDSSP:
-                raise WinRMError("requests auth method is credssp, but requests-credssp is not installed")
-            session.auth = HttpCredSSPAuth(username=self.username, password=self.password)
 
         else:
             raise WinRMError("unsupported auth method: %s" % self.auth_method)
@@ -175,7 +158,7 @@ class Transport(object):
         return session
 
     def send_message(self, message):
-        # TODO support kerberos/ntlm session with message encryption
+        # TODO support kerberos session with message encryption
 
         if not self.session:
             self.session = self.build_session()
@@ -189,7 +172,15 @@ class Transport(object):
         prepared_request = self.session.prepare_request(request)
 
         try:
-            response = self.session.send(prepared_request, timeout=self.read_timeout_sec)
+            for attempt in range(5):
+                try:
+                    response = self.session.send(prepared_request, timeout=self.read_timeout_sec)
+                    break
+                except requests.exceptions.ConnectionError as e:
+                    if attempt == 4 or 'connection refused' not in str(e).lower():
+                        raise
+                    time.sleep(5)
+
             response_text = response.text
             response.raise_for_status()
             return response_text
