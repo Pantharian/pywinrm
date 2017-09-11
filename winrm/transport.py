@@ -179,6 +179,10 @@ class Transport(object):
                     if attempt == 4 or 'connection refused' not in str(e).lower():
                         raise
                     time.sleep(5)
+                except requests.HTTPError as ex1:
+                    if attempt == 4
+                        raise
+                    time.sleep(5)
 
             response_text = response.text
             response.raise_for_status()
