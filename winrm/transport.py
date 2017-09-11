@@ -179,8 +179,8 @@ class Transport(object):
                     if attempt == 4 or 'connection refused' not in str(e).lower():
                         raise
                     time.sleep(5)
-                except requests.HTTPError as ex1:
-                    if attempt == 4
+                except requests.HTTPError:
+                    if attempt == 4:
                         raise
                     time.sleep(5)
 
