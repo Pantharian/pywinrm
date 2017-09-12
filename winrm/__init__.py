@@ -3,6 +3,10 @@ import re
 from base64 import b64encode
 import xml.etree.ElementTree as ET
 
+import time
+from requests import HTTPError
+
+from winrm.exceptions import InvalidCredentialsError, WinRMOperationTimeoutError, WinRMTransportError
 from winrm.protocol import Protocol
 
 # Feature support attributes for multi-version clients.
@@ -34,12 +38,20 @@ class Session(object):
 
     def run_cmd(self, command, args=()):
         # TODO optimize perf. Do not call open/close shell every time
-        shell_id = self.protocol.open_shell()
-        command_id = self.protocol.run_command(shell_id, command, args)
-        rs = Response(self.protocol.get_command_output(shell_id, command_id))
-        self.protocol.cleanup_command(shell_id, command_id)
-        self.protocol.close_shell(shell_id)
-        return rs
+        for attempt in range(5):
+            try:
+                shell_id = self.protocol.open_shell()
+                command_id = self.protocol.run_command(shell_id, command, args)
+                rs = Response(self.protocol.get_command_output(shell_id, command_id))
+                self.protocol.cleanup_command(shell_id, command_id)
+                self.protocol.close_shell(shell_id)
+                return rs
+            except Exception as ex:
+                if attempt != 4:
+                    time.sleep(5)
+                    continue
+                else:
+                    raise
 
     def run_ps(self, script):
         """base64 encodes a Powershell script and executes the powershell

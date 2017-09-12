@@ -3,7 +3,6 @@ from contextlib import contextmanager
 import re
 import sys
 import os
-import time
 import weakref
 import distutils
 
@@ -11,10 +10,12 @@ is_py2 = sys.version[0] == '2'
 
 if is_py2:
     from urlparse import urlsplit, urlunsplit
+
     # use six for this instead?
     unicode_type = type(u'')
 else:
     from urllib.parse import urlsplit, urlunsplit
+
     # use six for this instead?
     unicode_type = type(u'')
 
@@ -27,6 +28,7 @@ from requests.adapters import HTTPAdapter
 HAVE_KERBEROS = False
 try:
     from requests_kerberos import HTTPKerberosAuth, REQUIRED, OPTIONAL, DISABLED
+
     HAVE_KERBEROS = True
 except ImportError:
     pass
@@ -34,6 +36,7 @@ except ImportError:
 HAVE_NTLM = False
 try:
     from requests_ntlm import HttpNtlmAuth
+
     HAVE_NTLM = True
 except ImportError as ie:
     pass
@@ -45,8 +48,8 @@ __all__ = ['Transport']
 
 import ssl
 
+
 class Transport(object):
-    
     def __init__(
             self, endpoint, username=None, password=None, realm=None,
             service=None, keytab=None, ca_trust_path=None, cert_pem=None,
@@ -84,13 +87,15 @@ class Transport(object):
 
         # try to suppress user-unfriendly warnings from requests' vendored urllib3
         try:
-            from requests.packages.urllib3.exceptions import InsecurePlatformWarning, SNIMissingWarning, InsecureRequestWarning
+            from requests.packages.urllib3.exceptions import InsecurePlatformWarning, SNIMissingWarning, \
+                InsecureRequestWarning
             warnings.simplefilter('ignore', category=InsecurePlatformWarning)
             warnings.simplefilter('ignore', category=SNIMissingWarning)
             # if we're explicitly ignoring validation, try to suppress InsecureRequestWarning, since the user opted-in
             if self.server_cert_validation == 'ignore':
                 warnings.simplefilter('ignore', category=InsecureRequestWarning)
-        except: pass # oh well, we tried...
+        except:
+            pass  # oh well, we tried...
 
         # validate credential requirements for various auth types
         if self.auth_method != 'kerberos':
@@ -132,7 +137,7 @@ class Transport(object):
                                             force_preemptive=True, principal=self.username,
                                             hostname_override=self.kerberos_hostname_override,
                                             sanitize_mutual_error_response=False)
-        elif self.auth_method in ['certificate','ssl']:
+        elif self.auth_method in ['certificate', 'ssl']:
             if self.auth_method == 'ssl' and not self.cert_pem and not self.cert_key_pem:
                 # 'ssl' was overloaded for HTTPS with optional certificate auth,
                 # fall back to basic auth if no cert specified
@@ -146,7 +151,7 @@ class Transport(object):
                 raise WinRMError("requested auth method is ntlm, but requests_ntlm is not installed")
             session.auth = HttpNtlmAuth(username=self.username, password=self.password)
         # TODO: ssl is not exactly right here- should really be client_cert
-        elif self.auth_method in ['basic','plaintext']:
+        elif self.auth_method in ['basic', 'plaintext']:
             session.auth = requests.auth.HTTPBasicAuth(username=self.username, password=self.password)
 
         else:
@@ -170,35 +175,7 @@ class Transport(object):
         request = requests.Request('POST', self.endpoint, data=message)
         prepared_request = self.session.prepare_request(request)
 
-        try:
-            for attempt in range(5):
-                try:
-                    response = self.session.send(prepared_request, timeout=self.read_timeout_sec)
-                    break
-                except requests.exceptions.ConnectionError as e:
-                    if attempt == 4 or 'connection refused' not in str(e).lower():
-                        raise
-                    time.sleep(5)
-                except requests.HTTPError:
-                    if attempt == 4:
-                        raise
-                    time.sleep(5)
-
-            response_text = response.text
-            response.raise_for_status()
-            return response_text
-        except requests.HTTPError as ex:
-            if ex.response.status_code == 401:
-                raise InvalidCredentialsError("the specified credentials were rejected by the server")
-            if ex.response.content:
-                response_text = ex.response.content
-            else:
-                response_text = ''
-            # Per http://msdn.microsoft.com/en-us/library/cc251676.aspx rule 3,
-            # should handle this 500 error and retry receiving command output.
-            if b'http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive' in message and b'Code="2150858793"' in response_text:
-                raise WinRMOperationTimeoutError()
-
-            error_message = 'Bad HTTP response returned from server - GRRR - Code {0} - {1}'.format(ex.response.status_code, response_text)
-
-            raise WinRMTransportError('http', error_message)
+        response = self.session.send(prepared_request, timeout=self.read_timeout_sec)
+        response_text = response.text
+        response.raise_for_status()
+        return response_text
